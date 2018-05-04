@@ -8,12 +8,18 @@ using UnityEngine.UI;
 public class FBManager : MonoBehaviour
 {
     [SerializeField] GameObject loginButton;
-    [SerializeField] GameObject logoutButton;
+    //    [SerializeField] GameObject logoutButton;
+    [SerializeField] GameObject logginUI; // loggined Group
     [SerializeField] Text profileName;
     [SerializeField] Image profileImage;
+    [SerializeField] GameObject friendPref;
+    [SerializeField] Transform friendContent;
+
+    static string appLink = "https://play.google.com/store/apps/details?id=com.tappybyte.byteaway";
 
     void Awake()
     {
+        logginUI.SetActive(false);
         if (!FB.IsInitialized)
             FB.Init(InitCallback, OnHideUnity);
         else
@@ -58,9 +64,9 @@ public class FBManager : MonoBehaviour
 //            Debug.Log(FB.IsLoggedIn ? "Login success" : "Login failed");
             if (FB.IsLoggedIn)
             {
-                var aToken = Facebook.Unity.AccessToken.CurrentAccessToken;
-                foreach (string perm in aToken.Permissions)
-                    Debug.Log(perm);
+//                var aToken = Facebook.Unity.AccessToken.CurrentAccessToken;
+//                foreach (string perm in aToken.Permissions)
+//                    Debug.Log(perm);
                 Debug.Log("Login success");
             }
             else
@@ -74,7 +80,7 @@ public class FBManager : MonoBehaviour
         if (loggedIn)
         {
             loginButton.SetActive(false);
-            logoutButton.SetActive(true);
+            logginUI.SetActive(true);
             string infoQuery = "/me?fields=name";
             string pictureQuery = "/me/picture?type=large";
             string friendQuery = "/me/friends";
@@ -83,11 +89,24 @@ public class FBManager : MonoBehaviour
             //            FB.API("/me?fields=email", HttpMethod.GET, GetEmail, new Dictionary<string, string>());
             FB.API(pictureQuery, HttpMethod.GET, GetProfileImg); // type can be "square" or "large"
             FB.API(friendQuery, HttpMethod.GET, FriendsCallBack);
+            FB.GetAppLink(AppLinkCallBack);
         }
         else
         {
             loginButton.SetActive(true);
-            logoutButton.SetActive(false);
+            logginUI.SetActive(false);
+        }
+    }
+
+    void AppLinkCallBack(IAppLinkResult result)
+    {
+        if (string.IsNullOrEmpty(result.Error))
+        {
+//            Debug.Log("Applink done: " + result.RawResult);
+        }
+        else
+        {
+            Debug.Log("Applink error: "+ result.Error);
         }
     }
 
@@ -105,8 +124,7 @@ public class FBManager : MonoBehaviour
     void GetProfileImg(IGraphResult result)
     {
         if (result.Error == null)
-            profileImage.sprite = Sprite.Create(result.Texture,
-                new Rect(0, 0, result.Texture.width, result.Texture.height), new Vector2());
+            profileImage.sprite = Sprite.Create(result.Texture, new Rect(0, 0, result.Texture.width, result.Texture.height), new Vector2());
         else
             Debug.Log(result.Error);
     }
@@ -114,14 +132,15 @@ public class FBManager : MonoBehaviour
     public void FBLogout()
     {
         FB.LogOut();
-        loginButton.SetActive(true);
         profileName.gameObject.SetActive(false);
-        profileImage.DOFade(0, 1).SetEase(Ease.Linear).OnComplete(() => AfterFadeImg(gameObject));
+        profileImage.DOFade(0, 1).SetEase(Ease.Linear).OnComplete(AfterFadeImg); 
     }
 
-    void AfterFadeImg(GameObject go)
+    void AfterFadeImg()
     {
-        go.SetActive(false);
+        profileImage.gameObject.SetActive(false);
+        loginButton.SetActive(true);
+        logginUI.SetActive(false);
     }
 
     public void FBShare()
@@ -146,29 +165,70 @@ public class FBManager : MonoBehaviour
 
     public void FBInvite()
     {
-//        FB.Mobile.AppInvite(new Uri("https://play.google.com/store/apps/details?id=com.resocoder.onecalc.calculator"));
-        FB.AppRequest(message: "You should try this game.", title: "Check this super game");
+//        FB.AppRequest(message: "You should try this game.", title: "Check this super game");
+        FB.Mobile.AppInvite(new Uri(appLink), new Uri("http://brainivore.com/Images/Logo.png"), InviteCallBack);
+     
     }
 
+    void InviteCallBack(IAppInviteResult result)
+    {
+        if (result.Cancelled)
+        {
+            Debug.Log("Invite canceled");
+        }
+        else if(!string.IsNullOrEmpty(result.Error))
+        {
+            Debug.Log("Error in invite " + result.Error);
+        }
+        else
+        {
+            Debug.Log("Invite was successful" + result.RawResult);
+        }
+    }
     public void FBRequest()
     {
-        FB.AppRequest("Join me", title: "Play game");
+        FB.AppRequest("Join me", null, new List<object>() { "app_users" }, null, null, "Data", "Challenge friends", ChallengeCallBack);
+//        FB.AppRequest(message: "Check this game", title: "Play game");
+
     }
 
+    void ChallengeCallBack(IAppRequestResult result)
+    {
+        if (result.Cancelled)
+            Debug.Log("Cancled");
+        else if (!string.IsNullOrEmpty(result.Error))
+            Debug.Log(result.Error);
+        else
+            Debug.Log("Chanllenge successed" + result.RawResult);
+    }
+    
     void FriendsCallBack(IGraphResult result) // need permission 'user_friends'
     {
-        Debug.Log(result.RawResult);
 //        var data = (Dictionary<string, object>) Facebook.MiniJSON.Json.Deserialize(result.RawResult);
         IDictionary<string, object> data = result.ResultDictionary;
         List<object> friends = data["data"] as List<object>;
         foreach (var friend in friends)
         {
             var friendDic = friend as Dictionary<string, object>;
-//            Debug.Log("Name: " + friendDic["name"] + " , ID: " + friendDic["id"]);
-
+            CreateFriend(friendDic["name"].ToString(), friendDic["id"].ToString());
         }
-
-
-        // debug name and id of friends
     }
+
+    void CreateFriend(string name, string id)
+    {
+        GameObject f = Instantiate(friendPref);
+        f.transform.GetChild(1).GetComponent<Text>().text = name; 
+        f.transform.SetParent(friendContent.transform);
+        string picQuery = id + "/picture?type=large";
+
+        FB.API(picQuery, HttpMethod.GET, delegate(IGraphResult result)
+        {
+            if (result.Error == null)
+                f.transform.GetChild(0).GetComponent<Image>().sprite = Sprite.Create(result.Texture, new Rect(0f, 0f, result.Texture.width, result.Texture.height), new Vector2());
+            else
+                Debug.Log(result.Error);
+        });
+    }
+      
+    
 }
